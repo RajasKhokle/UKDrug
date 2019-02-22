@@ -10,65 +10,68 @@ Created on Thu Feb 21 19:16:53 2019
 import pandas as pd
 from sqlalchemy import create_engine
 import datetime
+import re
 
 # Create Connection to the database
 
 engine = create_engine('postgres://postgres:DataAdmin@127.0.0.1:5432/Capstone')
 
-def create_table():
-    ''' Create the Tables - Transactions, Chemicals and Address. While tranactions 
-    will be appended serially, Chemicals and Address will be unique and only new
-    ones will be appended'''
-    
-    tran_create='''CREATE TABLE TRANSACTIONS(
-            TRANID SERIAL PRIMARY KEY,
-            TRANPRACTICE VARCHAR(10) NOT NULL, 
-            TRANBNFCODE VARCHAR(15) NOT NULL,
-            TRANBNFNAME VARCHAR(200),
-            ITEMS BIGINT,
-            NIC NUMERIC,
-            ACTCOST NUMERIC,
-            QUANTITY INTEGER
-            );'''
-    
-    chem_create = '''CREATE TABLE CHEMICALS(
-            CHEMBNFCODE VARCHAR (15) NOT NULL,
-            CHEMBNFNAME VARCHAR(200) NOT NULL,
-            UNIQUE(CHEMBNFCODE,CHEMBNFNAME)
-            );'''
-    
-    addr_create='''CREATE TABLE ADDRESS(
-            ADDID SERIAL PRIMARY KEY,
-            ADDPRACTICE VARCHAR(10) NOT NULL UNIQUE,
-            PRACNAME VARCHAR(200) NOT NULL),
-            PRACADDR VARCHAR(200),
-            STREETADDR VARCHAR(200),
-            AREA VARCHAR(200),
-            TOWN VARCHAR(200),
-            ZIPCODE VARCHAR (10)
-            );'''
-    
-    try:
-        engine.execute(tran_create)
-    except:
-        print('The Transaction Table already exists')
 
+''' Create the Tables - Transactions, Chemicals and Address. While tranactions 
+will be appended serially, Chemicals and Address will be unique and only new
+ones will be appended'''
+
+tran_create='''CREATE TABLE TRANSACTIONS(
+        TRANID SERIAL PRIMARY KEY,
+        TRANPRACTICE VARCHAR(10) NOT NULL, 
+        TRANBNFCODE VARCHAR(15) NOT NULL,
+        TRANBNFNAME VARCHAR(200),
+        ITEMS BIGINT,
+        NIC NUMERIC,
+        ACTCOST NUMERIC,
+        QUANTITY INTEGER,
+        PERIOD VARCHAR(10)
+        );'''
+
+chem_create = '''CREATE TABLE CHEMICALS(
+        CHEMID SERIAL PRIMARY KEY,
+        CHEMBNFCODE VARCHAR (15) NOT NULL,
+        CHEMBNFNAME VARCHAR(200) NOT NULL
+        );'''
+
+addr_create='''CREATE TABLE ADDRESS(
+        ADDID SERIAL PRIMARY KEY,
+        ADDRDATE VARCHAR(10),
+        ADDPRACTICE VARCHAR(10) NOT NULL,
+        PRACNAME VARCHAR(200) NOT NULL,
+        PRACADDR VARCHAR(200),
+        STREETADDR VARCHAR(200),
+        AREA VARCHAR(200),
+        TOWN VARCHAR(200),
+        ZIPCODE VARCHAR (10)
+        );'''
+
+try:
+    engine.execute(tran_create)
+except:
+    print('The Transaction Table already exists')
+
+
+try:
+    engine.execute(chem_create)
+except:
+    print('The Chemical Table already exists.')
     
-    try:
-        engine.execute(chem_create)
-    except:
-        print('The Chemical Table already exists')
-        
-    
-    try:
-        engine.execute(addr_create)
-    except:
-        print('The Address Table already exists')
+
+try:
+    engine.execute(addr_create)
+except:
+    print('The Address Table already exists')
         
     
 
 # Get the filename
-year = list(range(2011,2019))
+year = list(range(2010,2019))
 year = [str(x) for x in year]
 
 month= list(range(1,13))
@@ -94,19 +97,78 @@ for i in range(len(year)):
 
 
 # Load the chemical File
-df_chem = pd.read_csv(chem_fullfile[50])
-df_chem.drop([df_chem.columns[2],df_chem.columns[3]],axis = 1,inplace =True)
+
+for i in range(len(chem_fullfile)):
+    try:
+        df_chem = pd.read_csv(chem_fullfile[i])
+    except:
+        continue
+    
+    df_chem.drop([df_chem.columns[2],df_chem.columns[3]],axis = 1,inplace =True) # Drop Unnecessary columns
+    df_chem.columns=['chembnfcode','chembnfname']                                # Rename the columns
+    
+    # load to the database
+    df_chem.to_sql('chemicals',engine,if_exists='append',index =False)
+
+
+    # Remove the duplicates from the chemicals columns
+
+del_dup = '''DELETE  FROM
+    chemicals a
+        USING chemicals b
+WHERE
+    a.chemid > b.chemid
+    AND a.chembnfname = b.chembnfname;'''
+
+engine.execute(del_dup)
+
+# Load the Address File
+addr_columns = ['addrdate','addpractice','pracname','pracaddr','streetaddr','area',
+                'town','zipcode']
+for i in range(len(chem_fullfile)):
+    try:
+        df_addr = pd.read_csv(addr_fullfile[i],header = None)
+    except:
+        continue
+    if len(df_addr.columns)>8:                                # To handle some files for which extra null column at end is imported
+        df_addr.drop(df_addr.columns[-1],axis =1,inplace =True)
+    
+    df_addr.columns = addr_columns
+    
+    # load to the database
+    df_addr.to_sql('address',engine,if_exists='append',index =False)
+
 
 # Load the Transaction File
-df_trans = pd.read_csv(pdpi_fullfile[0])
-df_trans.drop([df_trans.columns[0],df_trans.columns[1],df_trans.columns[-1]], 
-              axis = 1,inplace =True)
-
-# Find the data on 5-10 categories
-
-categories = ['']
+trans_columns = ['tranpractice','tranbnfcode','tranbnfname','items','nic',
+                    'actcost','quantity','period']
+for i in range(len(pdpi_fullfile)):
+    try:
+        df_trans = pd.read_csv(pdpi_fullfile[10])
+    except:
+        continue
+    df_trans.drop([df_trans.columns[0],df_trans.columns[1],df_trans.columns[-1]], 
+                  axis = 1,inplace =True)
+    df_trans.columns = trans_columns
     
-# Get 10 categories and 10 drugs from each category
+       
+    # Get 5 categories and all drugs from each category
+    df1 = df_trans[df_trans['tranbnfcode'].str.match('01')]
+    df2 = df_trans[df_trans['tranbnfcode'].str.match('02')]
+    df3 = df_trans[df_trans['tranbnfcode'].str.match('03')]
+    df4 = df_trans[df_trans['tranbnfcode'].str.match('04')]
+    df5 = df_trans[df_trans['tranbnfcode'].str.match('05')]
+    frames = [df1,df2,df3,df4,df5]
+    df_total = pd.concat(frames)
+    
+    # Save to database
+    df_total.to_sql('transaction',engine,if_exists='append',index =False)
+    # delete the dataframe to save space
+    del df_trans,df1,df2,df3,df4,df5,df_total
+
+
+
+
 
 ''' Initial Time series modelling on one of the drugs'''
 
