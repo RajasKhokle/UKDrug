@@ -9,8 +9,7 @@ Created on Thu Feb 21 19:16:53 2019
 
 import pandas as pd
 from sqlalchemy import create_engine
-import datetime
-import re
+
 
 # Create Connection to the database
 
@@ -18,10 +17,10 @@ engine = create_engine('postgres://postgres:DataAdmin@127.0.0.1:5432/Capstone')
 
 
 ''' Create the Tables - Transactions, Chemicals and Address. While tranactions 
-will be appended serially, Chemicals and Address will be unique and only new
+will be appended serially, Chemicals will be unique and only new
 ones will be appended'''
 
-tran_create='''CREATE TABLE TRANSACTIONS(
+tran_create='''CREATE TABLE DIABETES(
         TRANID SERIAL PRIMARY KEY,
         TRANPRACTICE VARCHAR(10) NOT NULL, 
         TRANBNFCODE VARCHAR(15) NOT NULL,
@@ -144,27 +143,64 @@ trans_columns = ['tranpractice','tranbnfcode','tranbnfname','items','nic',
                     'actcost','quantity','period']
 for i in range(len(pdpi_fullfile)):
     try:
-        df_trans = pd.read_csv(pdpi_fullfile[10])
+        df_trans = pd.read_csv(pdpi_fullfile[i])
     except:
         continue
     df_trans.drop([df_trans.columns[0],df_trans.columns[1],df_trans.columns[-1]], 
                   axis = 1,inplace =True)
     df_trans.columns = trans_columns
+    print(f'Processing {i} th file')
+    ''' Get the data for diabetes related drug only 
+        Diabetic Monitoring Agents =060106 - There are 5 types of drugs in BNF. 
+        This gives how people many were tested.
+        Insulin = 060101 (There are 14 drugs in BNF which are labeled as insulin). 
+        This gives how many had high Sugar.
+        Hypoglycemia = 060104 - 3 Types of Drugs. This gives how many had low sugar.'''
+
+    insulin = df_trans[df_trans['tranbnfcode'].str.match('060101')]
+    hypoglycemia = df_trans[df_trans['tranbnfcode'].str.match('060104')]
+    diabetic_test = df_trans[df_trans['tranbnfcode'].str.match('060106')]
     
-       
-    # Get 5 categories and all drugs from each category
-    df1 = df_trans[df_trans['tranbnfcode'].str.match('01')]
-    df2 = df_trans[df_trans['tranbnfcode'].str.match('02')]
-    df3 = df_trans[df_trans['tranbnfcode'].str.match('03')]
-    df4 = df_trans[df_trans['tranbnfcode'].str.match('04')]
-    df5 = df_trans[df_trans['tranbnfcode'].str.match('05')]
-    frames = [df1,df2,df3,df4,df5]
+    frames = [insulin,hypoglycemia,diabetic_test]
     df_total = pd.concat(frames)
     
+    df_total.to_sql('diabetes',engine,if_exists='append',index =False)
+
+
+# Run these lines only once after creating the databaser. Then commengt them 
+# for any updates.    
+# To increase the speed of querying an index on BNFCODE columns is created.
+code_index_create = 'CREATE INDEX CODE ON DIABETES(TRANBNFCODE)'
+engine.execute(code_index_create)
+
+practice_index_create = 'CREATE INDEX PRACTICE ON DIABETES(TRANPRACTICE)'
+engine.execute(practice_index_create)
+
+# Create a denormalized view / table with drugs and address combined 
+
+create_address_view = '''CREATE VIEW UKDRUG AS
+SELECT * FROM DIABETES JOIN ADDRESS ON 
+(DIABETES.TRANPRACTICE = ADDRESS.ADDPRACTICE AND 
+DIABETES.PERIOD = ADDRDATE) '''
+engine.execute(create_address_view)
+       
+# Get 5 categories and all drugs from each category
+#    df1 = df_trans[df_trans['tranbnfcode'].str.match('01')]
+#    df2 = df_trans[df_trans['tranbnfcode'].str.match('02')]
+#    df3 = df_trans[df_trans['tranbnfcode'].str.match('03')]
+#    df4 = df_trans[df_trans['tranbnfcode'].str.match('04')]
+#    df5 = df_trans[df_trans['tranbnfcode'].str.match('05')]
+   
+#    frames = [df1,df2,df3,df4,df5]
+#    df_total = pd.concat(frames)
+    
     # Save to database
-    df_total.to_sql('transaction',engine,if_exists='append',index =False)
+#    df_total.to_sql('transactions',engine,if_exists='append',index =False)
     # delete the dataframe to save space
-    del df_trans,df1,df2,df3,df4,df5,df_total
+#    del df_trans,df1,df2,df3,df4,df5,df_total
+ 
+
+
 
 
 
